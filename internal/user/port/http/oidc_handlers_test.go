@@ -95,7 +95,15 @@ func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_RedirectsToSourceLoginWithN
 		loc, err := url.Parse(w.Header().Get("Location"))
 		s.Require().NoError(err)
 		s.Equal("/source/oauth/login/"+p+"/", loc.Path, "path must target the source login endpoint")
-		s.Equal(authURL, loc.Query().Get("next"), "next must hold the OIDC authorize URL verbatim")
+
+		// next holds the authorize URL with the prompt/max_age params we add
+		// to force a fresh upstream auth round-trip.
+		next, err := url.Parse(loc.Query().Get("next"))
+		s.Require().NoError(err)
+		s.Equal("login", next.Query().Get("prompt"))
+		s.Equal("0", next.Query().Get("max_age"))
+		s.Equal("x", next.Query().Get("client_id"))
+		s.Equal("goshop-state", next.Query().Get("state"))
 	}
 }
 
