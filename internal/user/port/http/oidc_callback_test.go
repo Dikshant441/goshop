@@ -259,13 +259,14 @@ func TestRoutes_OIDCMode_MountsGETLoginAndCallback(t *testing.T) {
 	t.Setenv("oidc_redirect_url", "http://localhost/cb")
 	t.Setenv("frontend_base_url", "https://shop.example.com")
 	t.Setenv("auth_secret", "test-secret")
+	t.Setenv("authentik_google_source_slug", "google")
 	_ = config.LoadConfig()
 	// Restore the pkg-level config after this test so other tests in the
 	// package don't inherit auth_mode=oidc + a dead fake-server URL. We must
 	// unset the OIDC env vars first because t.Setenv's own restoration runs
 	// after this cleanup (Cleanups fire LIFO and t.Setenv registered first).
 	t.Cleanup(func() {
-		for _, k := range []string{"auth_mode", "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_url", "frontend_base_url"} {
+		for _, k := range []string{"auth_mode", "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_url", "frontend_base_url", "authentik_google_source_slug"} {
 			_ = os.Unsetenv(k)
 		}
 		_ = config.LoadConfig()
@@ -275,11 +276,12 @@ func TestRoutes_OIDCMode_MountsGETLoginAndCallback(t *testing.T) {
 	engine := gin.New()
 	Routes(engine.Group("/api/v1"), db, validation.New())
 
-	// GET /auth/login should now exist (OIDC redirect to fake provider).
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	// GET /auth/login?provider=google should now exist (OIDC redirect to
+	// fake provider with source slug for headless SSO).
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login?provider=google", nil)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
-	require.Equal(t, http.StatusFound, w.Code, "GET /auth/login should redirect in OIDC mode: %s", w.Body.String())
+	require.Equal(t, http.StatusFound, w.Code, "GET /auth/login?provider=google should redirect in OIDC mode: %s", w.Body.String())
 
 	loc, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)

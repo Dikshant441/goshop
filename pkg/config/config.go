@@ -62,6 +62,17 @@ type Schema struct {
 	OIDCRedirectURL  string   `env:"oidc_redirect_url"`
 	OIDCJWKSURL      string   `env:"oidc_jwks_url"`
 	OIDCScopes       string   `env:"oidc_scopes" envDefault:"openid,email,profile"`
+
+	// Headless Authentik (only used when auth_mode=oidc). AuthentikAPIBase is
+	// the Authentik server URL (no trailing slash); AuthentikAdminToken is a
+	// long-lived API token for /api/v3 user provisioning. The *SourceSlug
+	// values map our public provider IDs to the federated source slugs
+	// configured inside Authentik (Directory → Federation & Social login).
+	AuthentikAPIBase            string `env:"authentik_api_base"`
+	AuthentikAdminToken         string `env:"authentik_admin_token"`
+	AuthentikGoogleSourceSlug   string `env:"authentik_google_source_slug"`
+	AuthentikFacebookSourceSlug string `env:"authentik_facebook_source_slug"`
+	AuthentikAppleSourceSlug    string `env:"authentik_apple_source_slug"`
 	// FrontendBaseURL is where the OIDC callback redirects the browser to after
 	// minting the GoShop JWT pair (e.g. https://goshop.example.com). The FE must
 	// expose a /auth/callback route that reads access_token + refresh_token

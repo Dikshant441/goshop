@@ -12,7 +12,9 @@ import (
 
 func RegisterHandlers(svr *grpc.Server, db dbs.Database, validator validation.Validation) {
 	userRepo := repository.NewUserRepository(db)
-	userSvc := service.NewUserService(validator, userRepo)
+	// gRPC stays on the local password flow; only the HTTP edge wires the
+	// headless Authentik client when auth_mode=oidc.
+	userSvc := service.NewUserService(validator, userRepo, nil)
 	userHandler := NewUserHandler(userSvc)
 
 	pb.RegisterUserServiceServer(svr, userHandler)

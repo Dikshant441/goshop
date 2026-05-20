@@ -27,7 +27,7 @@ func (suite *UserServiceTestSuite) SetupTest() {
 	logger.Initialize(config.ProductionEnv)
 	validator := validation.New()
 	suite.mockRepo = mocks.NewUserRepository(suite.T())
-	suite.service = NewUserService(validator, suite.mockRepo)
+	suite.service = NewUserService(validator, suite.mockRepo, nil)
 }
 
 func TestUserServiceTestSuite(t *testing.T) {

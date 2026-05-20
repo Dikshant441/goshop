@@ -38,34 +38,24 @@ const PROVIDERS: { id: SSOProvider; label: string; Icon: () => JSX.Element }[] =
 ]
 
 /**
- * SSOButtons renders the three upstream-IdP buttons plus a fallback "Sign in
- * with SSO" link that hits Authentik's default flow. Each button is a plain
- * anchor so the browser follows the 302 chain through Authentik back to
- * /auth/callback.
+ * SSOButtons renders one button per federated provider. In headless mode the
+ * link hits /api/v1/auth/login?provider=<id> which 302s through Authentik
+ * straight to the upstream IdP — the Authentik UI itself is never shown.
  */
 export default function SSOButtons() {
   return (
-    <div>
-      <div className="grid grid-cols-3 gap-2">
-        {PROVIDERS.map(({ id, label, Icon }) => (
-          <a
-            key={id}
-            href={`/api/v1/auth/login?provider=${id}`}
-            aria-label={`Continue with ${label}`}
-            className="flex items-center justify-center gap-2 py-2 px-3 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <Icon />
-            <span className="hidden sm:inline">{label}</span>
-          </a>
-        ))}
-      </div>
-
-      <a
-        href="/api/v1/auth/login"
-        className="mt-3 block text-center text-sm text-primary-600 hover:text-primary-700"
-      >
-        Sign in with SSO
-      </a>
+    <div className="grid grid-cols-3 gap-2">
+      {PROVIDERS.map(({ id, label, Icon }) => (
+        <a
+          key={id}
+          href={`/api/v1/auth/login?provider=${id}`}
+          aria-label={`Continue with ${label}`}
+          className="flex items-center justify-center gap-2 py-2 px-3 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+        >
+          <Icon />
+          <span className="hidden sm:inline">{label}</span>
+        </a>
+      ))}
     </div>
   )
 }

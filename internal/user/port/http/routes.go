@@ -6,14 +6,29 @@ import (
 
 	"goshop/internal/user/repository"
 	"goshop/internal/user/service"
+	"goshop/pkg/authentik"
 	"goshop/pkg/config"
 	"goshop/pkg/dbs"
 	"goshop/pkg/middleware"
 )
 
 func Routes(r *gin.RouterGroup, sqlDB dbs.Database, validator validation.Validation) {
+	cfg := config.GetConfig()
 	userRepo := repository.NewUserRepository(sqlDB)
-	userSvc := service.NewUserService(validator, userRepo)
+
+	// In headless OIDC mode the service delegates credential checks and
+	// self-service registration to Authentik; in JWT mode it stays purely
+	// local (ak = nil).
+	var ak service.AuthentikClient
+	if cfg.AuthMode == config.AuthModeOIDC {
+		ak = authentik.New(authentik.Config{
+			BaseURL:      cfg.AuthentikAPIBase,
+			ClientID:     cfg.OIDCClientID,
+			ClientSecret: cfg.OIDCClientSecret,
+			AdminToken:   cfg.AuthentikAdminToken,
+		})
+	}
+	userSvc := service.NewUserService(validator, userRepo, ak)
 	userHandler := NewUserHandler(userSvc)
 
 	addressRepo := repository.NewAddressRepository(sqlDB)
@@ -24,7 +39,6 @@ func Routes(r *gin.RouterGroup, sqlDB dbs.Database, validator validation.Validat
 	wishlistSvc := service.NewWishlistService(wishlistRepo)
 	wishlistHandler := NewWishlistHandler(wishlistSvc)
 
-	cfg := config.GetConfig()
 	authRoute := r.Group("/auth")
 
 	var authMiddleware gin.HandlerFunc

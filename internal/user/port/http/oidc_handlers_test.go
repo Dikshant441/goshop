@@ -50,8 +50,11 @@ func (s *OIDCHandlerTestSuite) SetupTest() {
 	logger.Initialize(config.ProductionEnv)
 	s.svc = mocks.NewUserService(s.T())
 	s.cfg = &config.Schema{
-		AuthSecret:      "test-secret",
-		FrontendBaseURL: "https://shop.example.com",
+		AuthSecret:                  "test-secret",
+		FrontendBaseURL:             "https://shop.example.com",
+		AuthentikGoogleSourceSlug:   "google",
+		AuthentikFacebookSourceSlug: "facebook",
+		AuthentikAppleSourceSlug:    "apple",
 	}
 }
 
@@ -71,24 +74,16 @@ func (s *OIDCHandlerTestSuite) newGet(target string) (*gin.Context, *httptest.Re
 // Login
 // =================================================================================================
 
-func (s *OIDCHandlerTestSuite) TestLogin_NoProviderHint_RedirectsToAuthCodeURL() {
-	const authURL = "https://auth.example.com/authorize?client_id=x&state=goshop-state"
-	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: authURL})
+func (s *OIDCHandlerTestSuite) TestLogin_MissingProvider_Returns400() {
+	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: "https://auth.example.com/authorize"})
 
 	c, w := s.newGet("/auth/login")
 	h.Login(c)
 
-	s.Equal(http.StatusFound, w.Code)
-	loc, err := url.Parse(w.Header().Get("Location"))
-	s.Require().NoError(err)
-	s.Equal("login", loc.Query().Get("prompt"))
-	s.Equal("0", loc.Query().Get("max_age"))
-	s.Equal("x", loc.Query().Get("client_id"))
-	s.Equal("goshop-state", loc.Query().Get("state"))
-	s.Empty(loc.Query().Get("idp"))
+	s.Equal(http.StatusBadRequest, w.Code)
 }
 
-func (s *OIDCHandlerTestSuite) TestLogin_ValidProvider_AppendsIdpHint() {
+func (s *OIDCHandlerTestSuite) TestLogin_ValidProvider_AppendsSourceSlug() {
 	const authURL = "https://auth.example.com/authorize?client_id=x&state=goshop-state"
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: authURL})
 
@@ -99,7 +94,7 @@ func (s *OIDCHandlerTestSuite) TestLogin_ValidProvider_AppendsIdpHint() {
 		s.Equal(http.StatusFound, w.Code)
 		loc, err := url.Parse(w.Header().Get("Location"))
 		s.Require().NoError(err)
-		s.Equal(p, loc.Query().Get("idp"), "idp hint must match provider %q", p)
+		s.Equal(p, loc.Query().Get("source"), "source slug must match provider %q", p)
 		// Pre-existing query params survive.
 		s.Equal("x", loc.Query().Get("client_id"))
 		s.Equal("goshop-state", loc.Query().Get("state"))
@@ -110,6 +105,20 @@ func (s *OIDCHandlerTestSuite) TestLogin_UnsupportedProvider_Returns400() {
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: "https://auth.example.com/authorize"})
 
 	c, w := s.newGet("/auth/login?provider=myspace")
+	h.Login(c)
+
+	s.Equal(http.StatusBadRequest, w.Code)
+}
+
+// When a known provider has no slug configured (admin hasn't wired the
+// federated source in Authentik yet), the handler must refuse rather than
+// emit an authorize URL with an empty source param.
+func (s *OIDCHandlerTestSuite) TestLogin_ProviderWithBlankSlug_Returns400() {
+	cfg := *s.cfg
+	cfg.AuthentikFacebookSourceSlug = ""
+	h := newOIDCHandlerWith(s.svc, &cfg, &fakeOIDC{authURL: "https://auth.example.com/authorize"})
+
+	c, w := s.newGet("/auth/login?provider=facebook")
 	h.Login(c)
 
 	s.Equal(http.StatusBadRequest, w.Code)
@@ -128,7 +137,7 @@ func (s *OIDCHandlerTestSuite) TestLogin_MalformedAuthCodeURL_Returns500() {
 	s.Equal(http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
 }
 
-func (s *OIDCHandlerTestSuite) TestLogin_ProviderHint_IsCaseInsensitive() {
+func (s *OIDCHandlerTestSuite) TestLogin_ProviderIsCaseInsensitive() {
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: "https://auth.example.com/a"})
 
 	c, w := s.newGet("/auth/login?provider=GOOGLE")
@@ -136,7 +145,7 @@ func (s *OIDCHandlerTestSuite) TestLogin_ProviderHint_IsCaseInsensitive() {
 
 	s.Equal(http.StatusFound, w.Code)
 	loc, _ := url.Parse(w.Header().Get("Location"))
-	s.Equal("google", loc.Query().Get("idp"))
+	s.Equal("google", loc.Query().Get("source"))
 }
 
 // NewOIDCHandler init-failure
