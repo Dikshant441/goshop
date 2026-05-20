@@ -79,7 +79,13 @@ func (s *OIDCHandlerTestSuite) TestLogin_NoProviderHint_RedirectsToAuthCodeURL()
 	h.Login(c)
 
 	s.Equal(http.StatusFound, w.Code)
-	s.Equal(authURL, w.Header().Get("Location"))
+	loc, err := url.Parse(w.Header().Get("Location"))
+	s.Require().NoError(err)
+	s.Equal("login", loc.Query().Get("prompt"))
+	s.Equal("0", loc.Query().Get("max_age"))
+	s.Equal("x", loc.Query().Get("client_id"))
+	s.Equal("goshop-state", loc.Query().Get("state"))
+	s.Empty(loc.Query().Get("idp"))
 }
 
 func (s *OIDCHandlerTestSuite) TestLogin_ValidProvider_AppendsIdpHint() {

@@ -85,25 +85,30 @@ func newOIDCHandlerWith(svc service.UserService, cfg *config.Schema, client oidc
 func (h *OIDCHandler) Login(c *gin.Context) {
 	authURL := h.oidc.AuthCodeURL("goshop-state")
 
+	u, err := url.Parse(authURL)
+	if err != nil {
+		apperror.Wrap(apperror.ErrInternal, err).HTTPError(c)
+		return
+	}
+	q := u.Query()
+
+	// Force Authentik to show the login/account-chooser screen instead of
+	// silently reusing an existing browser session (e.g. the admin session
+	// from the Authentik UI).
+	q.Set("prompt", "login")
+	q.Set("max_age", "0")
+
 	if provider := strings.ToLower(c.Query("provider")); provider != "" {
 		slug, ok := allowedSSOProviders[provider]
 		if !ok {
 			apperror.WrapMessage(apperror.ErrBadRequest, nil, "unsupported provider").HTTPError(c)
 			return
 		}
-		// Append the hint without breaking the existing query string.
-		u, err := url.Parse(authURL)
-		if err != nil {
-			apperror.Wrap(apperror.ErrInternal, err).HTTPError(c)
-			return
-		}
-		q := u.Query()
 		q.Set("idp", slug)
-		u.RawQuery = q.Encode()
-		authURL = u.String()
 	}
 
-	c.Redirect(http.StatusFound, authURL)
+	u.RawQuery = q.Encode()
+	c.Redirect(http.StatusFound, u.String())
 }
 
 // Callback consumes the authorization code from Authentik, exchanges it for
