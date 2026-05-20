@@ -71,25 +71,24 @@ func (s *OIDCHandlerTestSuite) newGet(target string) (*gin.Context, *httptest.Re
 	return c, w
 }
 
+// newSSO builds a Gin context for the SSORedirect handler with :provider
+// set as a path param (the handler reads c.Param, not c.Query).
+func (s *OIDCHandlerTestSuite) newSSO(provider string) (*gin.Context, *httptest.ResponseRecorder) {
+	c, w := s.newGet("/auth/sso/" + provider)
+	c.Params = gin.Params{{Key: "provider", Value: provider}}
+	return c, w
+}
+
 // Login
 // =================================================================================================
 
-func (s *OIDCHandlerTestSuite) TestLogin_MissingProvider_Returns400() {
-	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: "https://auth.example.com/authorize"})
-
-	c, w := s.newGet("/auth/login")
-	h.Login(c)
-
-	s.Equal(http.StatusBadRequest, w.Code)
-}
-
-func (s *OIDCHandlerTestSuite) TestLogin_ValidProvider_AppendsSourceSlug() {
+func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_AppendsSourceSlug() {
 	const authURL = "https://auth.example.com/authorize?client_id=x&state=goshop-state"
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: authURL})
 
 	for _, p := range []string{"google", "facebook", "apple"} {
-		c, w := s.newGet("/auth/login?provider=" + p)
-		h.Login(c)
+		c, w := s.newSSO(p)
+		h.SSORedirect(c)
 
 		s.Equal(http.StatusFound, w.Code)
 		loc, err := url.Parse(w.Header().Get("Location"))
@@ -101,11 +100,11 @@ func (s *OIDCHandlerTestSuite) TestLogin_ValidProvider_AppendsSourceSlug() {
 	}
 }
 
-func (s *OIDCHandlerTestSuite) TestLogin_UnsupportedProvider_Returns400() {
+func (s *OIDCHandlerTestSuite) TestSSO_UnsupportedProvider_Returns400() {
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: "https://auth.example.com/authorize"})
 
-	c, w := s.newGet("/auth/login?provider=myspace")
-	h.Login(c)
+	c, w := s.newSSO("myspace")
+	h.SSORedirect(c)
 
 	s.Equal(http.StatusBadRequest, w.Code)
 }
@@ -113,35 +112,35 @@ func (s *OIDCHandlerTestSuite) TestLogin_UnsupportedProvider_Returns400() {
 // When a known provider has no slug configured (admin hasn't wired the
 // federated source in Authentik yet), the handler must refuse rather than
 // emit an authorize URL with an empty source param.
-func (s *OIDCHandlerTestSuite) TestLogin_ProviderWithBlankSlug_Returns400() {
+func (s *OIDCHandlerTestSuite) TestSSO_ProviderWithBlankSlug_Returns400() {
 	cfg := *s.cfg
 	cfg.AuthentikFacebookSourceSlug = ""
 	h := newOIDCHandlerWith(s.svc, &cfg, &fakeOIDC{authURL: "https://auth.example.com/authorize"})
 
-	c, w := s.newGet("/auth/login?provider=facebook")
-	h.Login(c)
+	c, w := s.newSSO("facebook")
+	h.SSORedirect(c)
 
 	s.Equal(http.StatusBadRequest, w.Code)
 }
 
-// Reaches the url.Parse error branch by feeding Login an AuthCodeURL with
-// an unescaped '%' — net/url rejects that as an invalid escape. In
+// Reaches the url.Parse error branch by feeding SSORedirect an AuthCodeURL
+// with an unescaped '%' — net/url rejects that as an invalid escape. In
 // production this branch is unreachable (oauth2 always produces a valid
 // URL), but the defensive check still warrants coverage.
-func (s *OIDCHandlerTestSuite) TestLogin_MalformedAuthCodeURL_Returns500() {
+func (s *OIDCHandlerTestSuite) TestSSO_MalformedAuthCodeURL_Returns500() {
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: "http://%"})
 
-	c, w := s.newGet("/auth/login?provider=google")
-	h.Login(c)
+	c, w := s.newSSO("google")
+	h.SSORedirect(c)
 
 	s.Equal(http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
 }
 
-func (s *OIDCHandlerTestSuite) TestLogin_ProviderIsCaseInsensitive() {
+func (s *OIDCHandlerTestSuite) TestSSO_ProviderIsCaseInsensitive() {
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: "https://auth.example.com/a"})
 
-	c, w := s.newGet("/auth/login?provider=GOOGLE")
-	h.Login(c)
+	c, w := s.newSSO("GOOGLE")
+	h.SSORedirect(c)
 
 	s.Equal(http.StatusFound, w.Code)
 	loc, _ := url.Parse(w.Header().Get("Location"))

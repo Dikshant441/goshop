@@ -60,13 +60,14 @@ func Routes(r *gin.RouterGroup, sqlDB dbs.Database, validator validation.Validat
 	authRoute.PUT("/change-password", authMiddleware, userHandler.ChangePassword)
 
 	if cfg.AuthMode == config.AuthModeOIDC {
-		// OIDC mode additionally exposes GET /auth/login (redirects to
-		// Authentik with an optional ?provider hint) and /auth/callback
-		// (exchanges the code, upserts the user, mints a GoShop JWT pair,
-		// then bounces the browser to the FE). The POST /auth/login route
-		// above coexists thanks to method-based routing.
+		// OIDC mode adds:
+		//   GET  /auth/sso/:provider — redirect to Authentik authorize with
+		//                              source=<slug> so the federated IdP
+		//                              picker shows up without any Authentik UI
+		//   GET  /auth/callback      — exchange code, upsert user, mint
+		//                              GoShop JWT, bounce browser to the FE.
 		oidcHandler := NewOIDCHandler(userSvc, cfg)
-		authRoute.GET("/login", oidcHandler.Login)
+		authRoute.GET("/sso/:provider", oidcHandler.SSORedirect)
 		authRoute.GET("/callback", oidcHandler.Callback)
 	}
 

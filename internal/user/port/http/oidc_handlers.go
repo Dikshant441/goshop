@@ -81,19 +81,13 @@ func newOIDCHandlerWith(svc service.UserService, cfg *config.Schema, client oidc
 	return &OIDCHandler{service: svc, cfg: cfg, oidc: client}
 }
 
-// Login redirects the browser to Authentik's authorize endpoint with a
+// SSORedirect 302s the browser to Authentik's authorize endpoint with a
 // `source=<slug>` query parameter, which tells Authentik to skip its own
 // login UI and bounce immediately to the federated provider (Google /
-// Facebook / Apple). A provider must be supplied — there is no UI fallback
-// because in headless mode goshop never wants the user to see Authentik.
-// GET /api/v1/auth/login?provider=google
-func (h *OIDCHandler) Login(c *gin.Context) {
-	provider := c.Query("provider")
-	if provider == "" {
-		apperror.WrapMessage(apperror.ErrBadRequest, nil, "missing provider").HTTPError(c)
-		return
-	}
-	slug := providerSlug(h.cfg, provider)
+// Facebook / Apple).
+// GET /api/v1/auth/sso/:provider
+func (h *OIDCHandler) SSORedirect(c *gin.Context) {
+	slug := providerSlug(h.cfg, c.Param("provider"))
 	if slug == "" {
 		apperror.WrapMessage(apperror.ErrBadRequest, nil, "unsupported provider").HTTPError(c)
 		return

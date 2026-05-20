@@ -276,16 +276,22 @@ func TestRoutes_OIDCMode_MountsGETLoginAndCallback(t *testing.T) {
 	engine := gin.New()
 	Routes(engine.Group("/api/v1"), db, validation.New())
 
-	// GET /auth/login?provider=google should now exist (OIDC redirect to
-	// fake provider with source slug for headless SSO).
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login?provider=google", nil)
+	// GET /auth/sso/google should now exist (OIDC redirect to fake provider
+	// with source slug for headless SSO).
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/sso/google", nil)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
-	require.Equal(t, http.StatusFound, w.Code, "GET /auth/login?provider=google should redirect in OIDC mode: %s", w.Body.String())
+	require.Equal(t, http.StatusFound, w.Code, "GET /auth/sso/google should redirect in OIDC mode: %s", w.Body.String())
 
 	loc, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)
 	require.Contains(t, loc.Host, strings.TrimPrefix(fake.URL, "http://"), "should redirect to the fake Authentik provider")
+
+	// Test rename signal: also assert the legacy GET /auth/login path is gone.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/login?provider=google", nil)
+	w = httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code, "GET /auth/login must not be mounted in OIDC mode")
 
 	// And GET /auth/callback should be wired (missing code → 400).
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback", nil)

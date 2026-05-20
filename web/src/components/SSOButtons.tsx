@@ -48,7 +48,7 @@ export default function SSOButtons() {
       {PROVIDERS.map(({ id, label, Icon }) => (
         <a
           key={id}
-          href={`/api/v1/auth/login?provider=${id}`}
+          href={`/api/v1/auth/sso/${id}`}
           aria-label={`Continue with ${label}`}
           className="flex items-center justify-center gap-2 py-2 px-3 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50"
         >
