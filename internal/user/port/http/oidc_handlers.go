@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -81,10 +82,10 @@ func newOIDCHandlerWith(svc service.UserService, cfg *config.Schema, client oidc
 	return &OIDCHandler{service: svc, cfg: cfg, oidc: client}
 }
 
-// SSORedirect 302s the browser to Authentik's authorize endpoint with a
-// `source=<slug>` query parameter, which tells Authentik to skip its own
-// login UI and bounce immediately to the federated provider (Google /
-// Facebook / Apple).
+// SSORedirect 302s the browser straight into Authentik's federated source
+// login endpoint (/source/oauth/login/<slug>/), wrapping the OIDC authorize
+// URL as the `next` param. This bypasses the Authentik authentication flow
+// UI entirely — the user never sees Authentik, only the upstream IdP.
 // GET /api/v1/auth/sso/:provider
 func (h *OIDCHandler) SSORedirect(c *gin.Context) {
 	slug := providerSlug(h.cfg, c.Param("provider"))
@@ -94,15 +95,15 @@ func (h *OIDCHandler) SSORedirect(c *gin.Context) {
 	}
 
 	authURL := h.oidc.AuthCodeURL("goshop-state")
-	u, err := url.Parse(authURL)
-	if err != nil {
+	if _, err := url.Parse(authURL); err != nil {
 		apperror.Wrap(apperror.ErrInternal, err).HTTPError(c)
 		return
 	}
-	q := u.Query()
-	q.Set("source", slug)
-	u.RawQuery = q.Encode()
-	c.Redirect(http.StatusFound, u.String())
+
+	base := strings.TrimRight(h.cfg.AuthentikAPIBase, "/")
+	target := fmt.Sprintf("%s/source/oauth/login/%s/?next=%s",
+		base, slug, url.QueryEscape(authURL))
+	c.Redirect(http.StatusFound, target)
 }
 
 // Callback consumes the authorization code from Authentik, exchanges it for

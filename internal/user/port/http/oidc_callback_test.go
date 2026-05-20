@@ -260,13 +260,14 @@ func TestRoutes_OIDCMode_MountsGETLoginAndCallback(t *testing.T) {
 	t.Setenv("frontend_base_url", "https://shop.example.com")
 	t.Setenv("auth_secret", "test-secret")
 	t.Setenv("authentik_google_source_slug", "google")
+	t.Setenv("authentik_api_base", fake.URL)
 	_ = config.LoadConfig()
 	// Restore the pkg-level config after this test so other tests in the
 	// package don't inherit auth_mode=oidc + a dead fake-server URL. We must
 	// unset the OIDC env vars first because t.Setenv's own restoration runs
 	// after this cleanup (Cleanups fire LIFO and t.Setenv registered first).
 	t.Cleanup(func() {
-		for _, k := range []string{"auth_mode", "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_url", "frontend_base_url", "authentik_google_source_slug"} {
+		for _, k := range []string{"auth_mode", "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_url", "frontend_base_url", "authentik_google_source_slug", "authentik_api_base"} {
 			_ = os.Unsetenv(k)
 		}
 		_ = config.LoadConfig()
@@ -285,7 +286,8 @@ func TestRoutes_OIDCMode_MountsGETLoginAndCallback(t *testing.T) {
 
 	loc, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)
-	require.Contains(t, loc.Host, strings.TrimPrefix(fake.URL, "http://"), "should redirect to the fake Authentik provider")
+	require.Equal(t, "/source/oauth/login/google/", loc.Path, "should point at Authentik's source login endpoint")
+	require.NotEmpty(t, loc.Query().Get("next"), "next must contain the OIDC authorize URL")
 
 	// Test rename signal: also assert the legacy GET /auth/login path is gone.
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/login?provider=google", nil)

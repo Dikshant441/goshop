@@ -52,6 +52,7 @@ func (s *OIDCHandlerTestSuite) SetupTest() {
 	s.cfg = &config.Schema{
 		AuthSecret:                  "test-secret",
 		FrontendBaseURL:             "https://shop.example.com",
+		AuthentikAPIBase:            "https://auth.example.com",
 		AuthentikGoogleSourceSlug:   "google",
 		AuthentikFacebookSourceSlug: "facebook",
 		AuthentikAppleSourceSlug:    "apple",
@@ -82,8 +83,8 @@ func (s *OIDCHandlerTestSuite) newSSO(provider string) (*gin.Context, *httptest.
 // Login
 // =================================================================================================
 
-func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_AppendsSourceSlug() {
-	const authURL = "https://auth.example.com/authorize?client_id=x&state=goshop-state"
+func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_RedirectsToSourceLoginWithNext() {
+	const authURL = "https://auth.example.com/application/o/authorize/?client_id=x&state=goshop-state"
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: authURL})
 
 	for _, p := range []string{"google", "facebook", "apple"} {
@@ -93,10 +94,8 @@ func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_AppendsSourceSlug() {
 		s.Equal(http.StatusFound, w.Code)
 		loc, err := url.Parse(w.Header().Get("Location"))
 		s.Require().NoError(err)
-		s.Equal(p, loc.Query().Get("source"), "source slug must match provider %q", p)
-		// Pre-existing query params survive.
-		s.Equal("x", loc.Query().Get("client_id"))
-		s.Equal("goshop-state", loc.Query().Get("state"))
+		s.Equal("/source/oauth/login/"+p+"/", loc.Path, "path must target the source login endpoint")
+		s.Equal(authURL, loc.Query().Get("next"), "next must hold the OIDC authorize URL verbatim")
 	}
 }
 
@@ -144,7 +143,7 @@ func (s *OIDCHandlerTestSuite) TestSSO_ProviderIsCaseInsensitive() {
 
 	s.Equal(http.StatusFound, w.Code)
 	loc, _ := url.Parse(w.Header().Get("Location"))
-	s.Equal("google", loc.Query().Get("source"))
+	s.Equal("/source/oauth/login/google/", loc.Path)
 }
 
 // NewOIDCHandler init-failure
