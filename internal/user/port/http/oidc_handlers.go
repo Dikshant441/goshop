@@ -106,6 +106,19 @@ func (h *OIDCHandler) SSORedirect(c *gin.Context) {
 	c.Redirect(http.StatusFound, target)
 }
 
+// Logout 302s the browser to Authentik's end-session endpoint, which clears
+// the upstream session cookie, then bounces back to the FE root. The FE is
+// expected to clear its own JWT pair *before* navigating here so that the
+// goshop session and the Authentik session both die together.
+// GET /api/v1/auth/logout
+func (h *OIDCHandler) Logout(c *gin.Context) {
+	issuer := strings.TrimRight(h.cfg.OIDCIssuer, "/")
+	postLogout := strings.TrimRight(h.cfg.FrontendBaseURL, "/") + "/"
+	q := url.Values{"post_logout_redirect_uri": {postLogout}}
+	target := fmt.Sprintf("%s/end-session/?%s", issuer, q.Encode())
+	c.Redirect(http.StatusFound, target)
+}
+
 // Callback consumes the authorization code from Authentik, exchanges it for
 // an ID token, upserts the local user, mints a GoShop JWT pair, and finally
 // redirects the browser back to the FE with the tokens in the query string.

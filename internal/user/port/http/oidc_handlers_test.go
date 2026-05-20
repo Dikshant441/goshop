@@ -173,6 +173,25 @@ func (s *OIDCHandlerTestSuite) TestNewOIDCHandler_ValidatorInitFailure_InvokesHo
 	s.Contains(captured.Error(), "discover OIDC provider")
 }
 
+// Logout
+// =================================================================================================
+
+func (s *OIDCHandlerTestSuite) TestLogout_RedirectsToEndSessionWithPostLogoutURI() {
+	cfg := *s.cfg
+	cfg.OIDCIssuer = "https://auth.example.com/application/o/goshop-api/"
+	cfg.FrontendBaseURL = "https://shop.example.com"
+	h := newOIDCHandlerWith(s.svc, &cfg, &fakeOIDC{})
+
+	c, w := s.newGet("/auth/logout")
+	h.Logout(c)
+
+	s.Equal(http.StatusFound, w.Code)
+	loc, err := url.Parse(w.Header().Get("Location"))
+	s.Require().NoError(err)
+	s.Equal("/application/o/goshop-api/end-session/", loc.Path)
+	s.Equal("https://shop.example.com/", loc.Query().Get("post_logout_redirect_uri"))
+}
+
 // Callback
 // =================================================================================================
 

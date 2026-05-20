@@ -69,6 +69,7 @@ func Routes(r *gin.RouterGroup, sqlDB dbs.Database, validator validation.Validat
 		oidcHandler := NewOIDCHandler(userSvc, cfg)
 		authRoute.GET("/sso/:provider", oidcHandler.SSORedirect)
 		authRoute.GET("/callback", oidcHandler.Callback)
+		authRoute.GET("/logout", oidcHandler.Logout)
 	}
 
 	addressRoute := r.Group("/addresses", authMiddleware)
