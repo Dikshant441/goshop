@@ -1,13 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery } from '@tanstack/react-query'
 import { Eye, EyeOff, Store } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { z } from 'zod'
-import { paymentsApi } from '@/api/payments'
-import SSOButtons from '@/components/SSOButtons'
 import { useAuth } from '@/context/AuthContext'
 
 const schema = z.object({
@@ -23,15 +20,6 @@ export default function LoginPage() {
   const location = useLocation()
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/'
   const [showPassword, setShowPassword] = useState(false)
-
-  // Server-driven flag: in OIDC mode the API has no /auth/login POST, so we
-  // hide the password form and only render SSO buttons.
-  const { data: cfg } = useQuery({
-    queryKey: ['publicConfig'],
-    queryFn: paymentsApi.publicConfig,
-    staleTime: Infinity,
-  })
-  const isOIDC = cfg?.auth_mode === 'oidc'
 
   const {
     register,
@@ -110,19 +98,6 @@ export default function LoginPage() {
                 {isSubmitting ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
-
-          {isOIDC && (
-            <>
-              <div className="mt-6 flex items-center gap-3">
-                <div className="flex-1 h-px bg-gray-200" />
-                <span className="text-xs text-gray-400 uppercase">or continue with</span>
-                <div className="flex-1 h-px bg-gray-200" />
-              </div>
-              <div className="mt-4">
-                <SSOButtons />
-              </div>
-            </>
-          )}
 
           <div className="mt-5 text-center text-sm text-gray-500">
             Don't have an account?{' '}

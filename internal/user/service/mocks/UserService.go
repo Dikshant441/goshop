@@ -317,7 +317,7 @@ func (_c *UserService_RefreshToken_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // Register provides a mock function for the type UserService
-func (_mock *UserService) Register(ctx context.Context, req *domain.RegisterReq) (*model.User, error) {
+func (_mock *UserService) Register(ctx context.Context, req *domain.RegisterReq) (*model.User, string, string, error) {
 	ret := _mock.Called(ctx, req)
 
 	if len(ret) == 0 {
@@ -325,8 +325,10 @@ func (_mock *UserService) Register(ctx context.Context, req *domain.RegisterReq)
 	}
 
 	var r0 *model.User
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, *domain.RegisterReq) (*model.User, error)); ok {
+	var r1 string
+	var r2 string
+	var r3 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *domain.RegisterReq) (*model.User, string, string, error)); ok {
 		return returnFunc(ctx, req)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, *domain.RegisterReq) *model.User); ok {
@@ -336,12 +338,22 @@ func (_mock *UserService) Register(ctx context.Context, req *domain.RegisterReq)
 			r0 = ret.Get(0).(*model.User)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, *domain.RegisterReq) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *domain.RegisterReq) string); ok {
 		r1 = returnFunc(ctx, req)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(string)
 	}
-	return r0, r1
+	if returnFunc, ok := ret.Get(2).(func(context.Context, *domain.RegisterReq) string); ok {
+		r2 = returnFunc(ctx, req)
+	} else {
+		r2 = ret.Get(2).(string)
+	}
+	if returnFunc, ok := ret.Get(3).(func(context.Context, *domain.RegisterReq) error); ok {
+		r3 = returnFunc(ctx, req)
+	} else {
+		r3 = ret.Error(3)
+	}
+	return r0, r1, r2, r3
 }
 
 // UserService_Register_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Register'
@@ -374,12 +386,12 @@ func (_c *UserService_Register_Call) Run(run func(ctx context.Context, req *doma
 	return _c
 }
 
-func (_c *UserService_Register_Call) Return(user *model.User, err error) *UserService_Register_Call {
-	_c.Call.Return(user, err)
+func (_c *UserService_Register_Call) Return(user *model.User, s string, s1 string, err error) *UserService_Register_Call {
+	_c.Call.Return(user, s, s1, err)
 	return _c
 }
 
-func (_c *UserService_Register_Call) RunAndReturn(run func(ctx context.Context, req *domain.RegisterReq) (*model.User, error)) *UserService_Register_Call {
+func (_c *UserService_Register_Call) RunAndReturn(run func(ctx context.Context, req *domain.RegisterReq) (*model.User, string, string, error)) *UserService_Register_Call {
 	_c.Call.Return(run)
 	return _c
 }

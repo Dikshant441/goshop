@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
@@ -22,6 +23,12 @@ type Client struct {
 	ClientID     string
 	ClientSecret string
 	AdminToken   string
+	// FlowSlug is the slug of the Authentik authentication flow used for
+	// headless password verification via /api/v3/flows/executor/. The flow
+	// must contain only an Identification Stage + Password Stage (and
+	// optionally a User Login Stage). MFA/consent/captcha stages break the
+	// programmatic call.
+	FlowSlug string
 
 	HTTPClient *http.Client
 }
@@ -29,9 +36,10 @@ type Client struct {
 // Config bundles everything needed to construct a Client.
 type Config struct {
 	BaseURL      string // e.g. https://auth.example.com
-	ClientID     string // OAuth2 application client_id
-	ClientSecret string // OAuth2 application client_secret
+	ClientID     string // OAuth2 application client_id (unused with flow executor; kept for future)
+	ClientSecret string // OAuth2 application client_secret (unused; kept for future)
 	AdminToken   string // long-lived API token with user-write scope
+	FlowSlug     string // authentication flow slug, e.g. "goshop-ropg"
 }
 
 func New(cfg Config) *Client {
@@ -40,6 +48,7 @@ func New(cfg Config) *Client {
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
 		AdminToken:   cfg.AdminToken,
+		FlowSlug:     cfg.FlowSlug,
 		HTTPClient:   &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -51,77 +60,111 @@ type UserClaims struct {
 	Name  string `json:"name"`
 }
 
-type tokenResponse struct {
-	AccessToken string `json:"access_token"`
-	IDToken     string `json:"id_token"`
-	TokenType   string `json:"token_type"`
+// flowChallenge is the minimal subset of an Authentik flow-executor response
+// we care about. After password submission either:
+//   - component == "xak-flow-redirect" → auth succeeded
+//   - component == "ak-stage-password" with response_errors → bad password
+//   - component == "ak-stage-access-denied" or similar → user blocked
+type flowChallenge struct {
+	Component      string                       `json:"component"`
+	PendingUser    string                       `json:"pending_user"`
+	ResponseErrors map[string][]flowFieldError  `json:"response_errors"`
 }
 
-// PasswordLogin runs the Resource Owner Password Grant flow against the
-// configured OAuth2 provider, then fetches userinfo with the resulting access
-// token. Returns the claims of the authenticated user.
+type flowFieldError struct {
+	String string `json:"string"`
+	Code   string `json:"code"`
+}
+
+// PasswordLogin verifies email+password against Authentik using the flow
+// executor API. Authentik's ROPG (/application/o/token/ with grant_type=
+// password) is reserved for app-password tokens, not real user passwords —
+// the flow executor is the supported headless path.
+//
+// Steps:
+//  1. GET  /api/v3/flows/executor/<flow>/?query=          → identification challenge + session cookie
+//  2. POST same URL with {"uid_field": email}             → password challenge
+//  3. POST same URL with {"password": password}           → redirect (success) or password error
+//
+// On success the user is looked up via the admin API to obtain the OIDC sub.
 func (c *Client) PasswordLogin(ctx context.Context, email, password string) (*UserClaims, error) {
-	form := url.Values{
-		"grant_type": {"password"},
-		"username":   {email},
-		"password":   {password},
-		"scope":      {"openid email profile"},
+	if c.FlowSlug == "" {
+		return nil, fmt.Errorf("authentik flow slug not configured")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.BaseURL+"/application/o/token/", strings.NewReader(form.Encode()))
+	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(c.ClientID, c.ClientSecret)
+	httpClient := &http.Client{Timeout: 10 * time.Second, Jar: jar}
+	flowURL := fmt.Sprintf("%s/api/v3/flows/executor/%s/?query=", c.BaseURL, url.PathEscape(c.FlowSlug))
 
-	tok, err := c.doToken(req)
-	if err != nil {
-		return nil, err
+	// 1. Init session — discard body; we just need the cookie.
+	if _, err := c.flowCall(ctx, httpClient, http.MethodGet, flowURL, nil); err != nil {
+		return nil, fmt.Errorf("flow init: %w", err)
 	}
-	return c.UserInfo(ctx, tok.AccessToken)
+
+	// 2. Submit identifier.
+	idResp, err := c.flowCall(ctx, httpClient, http.MethodPost, flowURL,
+		map[string]string{"uid_field": email})
+	if err != nil {
+		return nil, fmt.Errorf("flow identification: %w", err)
+	}
+	if idResp.Component != "ak-stage-password" {
+		// Identification stage rejected the user (unknown username/email).
+		return nil, fmt.Errorf("authentik: unexpected stage after identification: %s", idResp.Component)
+	}
+
+	// 3. Submit password.
+	pwResp, err := c.flowCall(ctx, httpClient, http.MethodPost, flowURL,
+		map[string]string{"password": password})
+	if err != nil {
+		return nil, fmt.Errorf("flow password: %w", err)
+	}
+	if pwResp.Component != "xak-flow-redirect" {
+		// Most likely "ak-stage-password" with response_errors.password = "Invalid password".
+		if errs, ok := pwResp.ResponseErrors["password"]; ok && len(errs) > 0 {
+			return nil, fmt.Errorf("authentik: %s", errs[0].String)
+		}
+		return nil, fmt.Errorf("authentik: auth not completed at stage %s", pwResp.Component)
+	}
+
+	// Auth succeeded — pull the user record (sub + canonical email + name)
+	// from the admin API. Avoids needing an access token.
+	return c.LookupUserByEmail(ctx, email)
 }
 
-func (c *Client) doToken(req *http.Request) (*tokenResponse, error) {
-	resp, err := c.HTTPClient.Do(req) //nolint:gosec // URL is built from server config, not user input
+// flowCall does one round-trip against /api/v3/flows/executor/. The session
+// cookie is automatically attached/captured by the client's cookie jar.
+func (c *Client) flowCall(
+	ctx context.Context, client *http.Client, method, target string, body any,
+) (*flowChallenge, error) {
+	var reader io.Reader
+	if body != nil {
+		buf, _ := json.Marshal(body)
+		reader = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req) //nolint:gosec // URL is built from server config, not user input
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("authentik token endpoint %d: %s", resp.StatusCode, string(body))
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("flow executor %d: %s", resp.StatusCode, string(raw))
 	}
-	var tok tokenResponse
-	if err := json.Unmarshal(body, &tok); err != nil {
-		return nil, fmt.Errorf("decode token response: %w", err)
+	var ch flowChallenge
+	if err := json.Unmarshal(raw, &ch); err != nil {
+		return nil, fmt.Errorf("decode challenge: %w", err)
 	}
-	return &tok, nil
-}
-
-// UserInfo calls the OIDC userinfo endpoint with the given access token.
-func (c *Client) UserInfo(ctx context.Context, accessToken string) (*UserClaims, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		c.BaseURL+"/application/o/userinfo/", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	resp, err := c.HTTPClient.Do(req) //nolint:gosec // URL is built from server config, not user input
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("authentik userinfo %d: %s", resp.StatusCode, string(body))
-	}
-	var claims UserClaims
-	if err := json.Unmarshal(body, &claims); err != nil {
-		return nil, fmt.Errorf("decode userinfo: %w", err)
-	}
-	return &claims, nil
+	return &ch, nil
 }
 
 // CreateUser provisions a new internal Authentik user and sets their password
@@ -198,18 +241,46 @@ func (c *Client) doCreateUser(req *http.Request) (int, error) {
 	return u.PK, nil
 }
 
-// SourceAuthURL returns the OIDC authorize URL that, thanks to the `source`
-// query parameter, makes Authentik immediately bounce to the federated
-// provider (Google / Facebook / etc) without showing its own UI. The caller
-// is responsible for the rest of the OIDC parameters and the redirect URI.
-func (c *Client) SourceAuthURL(redirectURI, sourceSlug, state string) string {
-	q := url.Values{
-		"client_id":     {c.ClientID},
-		"redirect_uri":  {redirectURI},
-		"response_type": {"code"},
-		"scope":         {"openid email profile"},
-		"state":         {state},
-		"source":        {sourceSlug},
+// LookupUserByEmail asks the admin API for the user with the given email and
+// returns their OIDC-compatible claims (uuid → sub). Used after CreateUser so
+// callers don't have to rely on the ROPG flow — which Authentik validates
+// against the provider's redirect_uris and frequently 400s with
+// "invalid_grant" on freshly-provisioned users.
+func (c *Client) LookupUserByEmail(ctx context.Context, email string) (*UserClaims, error) {
+	if c.AdminToken == "" {
+		return nil, fmt.Errorf("authentik admin token not configured")
 	}
-	return c.BaseURL + "/application/o/authorize/?" + q.Encode()
+	q := url.Values{"email": {email}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.BaseURL+"/api/v3/core/users/?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	c.addAdminAuth(req)
+
+	resp, err := c.HTTPClient.Do(req) //nolint:gosec // URL is built from server config, not user input
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("authentik user lookup %d: %s", resp.StatusCode, string(body))
+	}
+	var page struct {
+		Results []struct {
+			UUID  string `json:"uuid"`
+			Email string `json:"email"`
+			Name  string `json:"name"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, fmt.Errorf("decode user lookup response: %w", err)
+	}
+	if len(page.Results) == 0 {
+		return nil, fmt.Errorf("authentik user lookup: no user with email %s", email)
+	}
+	u := page.Results[0]
+	return &UserClaims{Sub: u.UUID, Email: u.Email, Name: u.Name}, nil
 }
+

@@ -17,7 +17,9 @@ type RegisterReq struct {
 }
 
 type RegisterRes struct {
-	User User `json:"user"`
+	User         User   `json:"user"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type LoginReq struct {

@@ -41,7 +41,7 @@ func (h *UserHandler) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 }
 
 func (h *UserHandler) Register(ctx context.Context, req *pb.RegisterReq) (*pb.RegisterRes, error) {
-	user, err := h.service.Register(ctx, &domain.RegisterReq{
+	user, _, _, err := h.service.Register(ctx, &domain.RegisterReq{
 		Email:    req.Email,
 		Password: req.Password,
 	})

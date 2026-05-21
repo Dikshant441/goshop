@@ -65,14 +65,13 @@ type Schema struct {
 
 	// Headless Authentik (only used when auth_mode=oidc). AuthentikAPIBase is
 	// the Authentik server URL (no trailing slash); AuthentikAdminToken is a
-	// long-lived API token for /api/v3 user provisioning. The *SourceSlug
-	// values map our public provider IDs to the federated source slugs
-	// configured inside Authentik (Directory → Federation & Social login).
-	AuthentikAPIBase            string `env:"authentik_api_base"`
-	AuthentikAdminToken         string `env:"authentik_admin_token"`
-	AuthentikGoogleSourceSlug   string `env:"authentik_google_source_slug"`
-	AuthentikFacebookSourceSlug string `env:"authentik_facebook_source_slug"`
-	AuthentikAppleSourceSlug    string `env:"authentik_apple_source_slug"`
+	// long-lived API token for /api/v3 user provisioning (CreateUser +
+	// LookupUserByEmail in headless OIDC mode). FlowSlug names the
+	// authentication flow used for headless password verification via the
+	// flow executor API (Identification + Password stages only — no MFA).
+	AuthentikAPIBase    string `env:"authentik_api_base"`
+	AuthentikAdminToken string `env:"authentik_admin_token"`
+	AuthentikFlowSlug   string `env:"authentik_flow_slug" envDefault:"goshop-ropg"`
 	// FrontendBaseURL is where the OIDC callback redirects the browser to after
 	// minting the GoShop JWT pair (e.g. https://goshop.example.com). The FE must
 	// expose a /auth/callback route that reads access_token + refresh_token

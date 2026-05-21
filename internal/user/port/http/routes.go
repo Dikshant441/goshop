@@ -26,6 +26,7 @@ func Routes(r *gin.RouterGroup, sqlDB dbs.Database, validator validation.Validat
 			ClientID:     cfg.OIDCClientID,
 			ClientSecret: cfg.OIDCClientSecret,
 			AdminToken:   cfg.AuthentikAdminToken,
+			FlowSlug:     cfg.AuthentikFlowSlug,
 		})
 	}
 	userSvc := service.NewUserService(validator, userRepo, ak)
@@ -58,19 +59,6 @@ func Routes(r *gin.RouterGroup, sqlDB dbs.Database, validator validation.Validat
 	authRoute.POST("/refresh", refreshAuthMiddleware, userHandler.RefreshToken)
 	authRoute.GET("/me", authMiddleware, userHandler.GetMe)
 	authRoute.PUT("/change-password", authMiddleware, userHandler.ChangePassword)
-
-	if cfg.AuthMode == config.AuthModeOIDC {
-		// OIDC mode adds:
-		//   GET  /auth/sso/:provider — redirect to Authentik authorize with
-		//                              source=<slug> so the federated IdP
-		//                              picker shows up without any Authentik UI
-		//   GET  /auth/callback      — exchange code, upsert user, mint
-		//                              GoShop JWT, bounce browser to the FE.
-		oidcHandler := NewOIDCHandler(userSvc, cfg)
-		authRoute.GET("/sso/:provider", oidcHandler.SSORedirect)
-		authRoute.GET("/callback", oidcHandler.Callback)
-		authRoute.GET("/logout", oidcHandler.Logout)
-	}
 
 	addressRoute := r.Group("/addresses", authMiddleware)
 	{

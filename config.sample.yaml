@@ -29,13 +29,12 @@ frontend_base_url: https://goshop.cunghoclaptrinh.online
 
 # Headless Authentik (auth_mode = oidc only). API base is the server URL
 # without trailing slash; the admin token is a long-lived API token created
-# under Directory → Tokens. Source slugs come from Directory → Federation &
-# Social login → <provider> → Slug; leave blank to hide the button on the FE.
+# under Directory → Tokens.
 authentik_api_base: https://auth.cunghoclaptrinh.online
 authentik_admin_token: ######
-authentik_google_source_slug: google
-authentik_facebook_source_slug:
-authentik_apple_source_slug:
+# Authentication flow slug used by flow executor for headless password
+# verification. Must contain only Identification + Password stages.
+authentik_flow_slug: goshop-ropg
 
 # Stripe — required for payments. webhook_secret is given by `stripe listen`
 # or the dashboard; api_base is only set in tests to point at stripe-mock.

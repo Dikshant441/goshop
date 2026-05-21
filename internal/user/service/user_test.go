@@ -137,7 +137,7 @@ func (suite *UserServiceTestSuite) TestRegister() {
 		suite.Run(tc.name, func() {
 			suite.SetupTest()
 			tc.setup()
-			user, err := suite.service.Register(context.Background(), tc.req)
+			user, _, _, err := suite.service.Register(context.Background(), tc.req)
 			if tc.wantErr {
 				suite.Nil(user)
 				suite.NotNil(err)

@@ -68,14 +68,18 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	user, err := h.service.Register(c, &req)
+	user, accessToken, refreshToken, err := h.service.Register(c, &req)
 	if err != nil {
 		logger.Error(err.Error())
 		apperror.ToHTTPError(c, err, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 
-	response.JSON(c, http.StatusOK, domain.RegisterRes{User: *domain.UserFromModel(user)})
+	response.JSON(c, http.StatusOK, domain.RegisterRes{
+		User:         *domain.UserFromModel(user),
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	})
 }
 
 // GetMe godoc

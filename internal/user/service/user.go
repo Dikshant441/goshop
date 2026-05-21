@@ -19,7 +19,7 @@ import (
 //go:generate mockery --name=UserService
 type UserService interface {
 	Login(ctx context.Context, req *domain.LoginReq) (*model.User, string, string, error)
-	Register(ctx context.Context, req *domain.RegisterReq) (*model.User, error)
+	Register(ctx context.Context, req *domain.RegisterReq) (*model.User, string, string, error)
 	GetUserByID(ctx context.Context, id string) (*model.User, error)
 	RefreshToken(ctx context.Context, userID string) (string, error)
 	ChangePassword(ctx context.Context, id string, req *domain.ChangePasswordReq) error
@@ -33,6 +33,7 @@ type UserService interface {
 type AuthentikClient interface {
 	PasswordLogin(ctx context.Context, email, password string) (*authentik.UserClaims, error)
 	CreateUser(ctx context.Context, email, name, password string) error
+	LookupUserByEmail(ctx context.Context, email string) (*authentik.UserClaims, error)
 }
 
 type userService struct {
@@ -101,37 +102,43 @@ func mintTokens(user *model.User) (string, string) {
 	return jtoken.GenerateAccessToken(data), jtoken.GenerateRefreshToken(data)
 }
 
-func (s *userService) Register(ctx context.Context, req *domain.RegisterReq) (*model.User, error) {
+func (s *userService) Register(ctx context.Context, req *domain.RegisterReq) (*model.User, string, string, error) {
 	if err := s.validator.ValidateStruct(req); err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 
 	if s.authentik != nil {
-		// Headless OIDC: provision the user inside Authentik, then bring them
-		// into the local DB by logging in (Authentik's sub is the source of
-		// truth for the row's primary key).
+		// Headless OIDC: provision the user inside Authentik, then look up the
+		// sub via the admin API (avoids the ROPG round-trip, which Authentik
+		// rejects with "invalid_grant" on the provider's redirect_uri check
+		// for freshly-created users).
 		if err := s.authentik.CreateUser(ctx, req.Email, req.Email, req.Password); err != nil {
 			logger.Errorf("Authentik CreateUser fail, email: %s, error: %s", req.Email, err)
-			return nil, err
+			return nil, "", "", err
 		}
-		claims, err := s.authentik.PasswordLogin(ctx, req.Email, req.Password)
+		claims, err := s.authentik.LookupUserByEmail(ctx, req.Email)
 		if err != nil {
-			logger.Errorf("Authentik PasswordLogin after create fail, email: %s, error: %s", req.Email, err)
-			return nil, err
+			logger.Errorf("Authentik LookupUserByEmail after create fail, email: %s, error: %s", req.Email, err)
+			return nil, "", "", err
 		}
-		return s.UpsertUserFromOIDC(ctx, claims.Sub, claims.Email, claims.Name)
+		user, err := s.UpsertUserFromOIDC(ctx, claims.Sub, claims.Email, claims.Name)
+		if err != nil {
+			return nil, "", "", err
+		}
+		access, refresh := mintTokens(user)
+		return user, access, refresh, nil
 	}
 
 	var user model.User
 	if err := utils.Copy(&user, &req); err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
-	err := s.repo.Create(ctx, &user)
-	if err != nil {
+	if err := s.repo.Create(ctx, &user); err != nil {
 		logger.Errorf("Register.Create fail, email: %s, error: %s", req.Email, err)
-		return nil, err
+		return nil, "", "", err
 	}
-	return &user, nil
+	access, refresh := mintTokens(&user)
+	return &user, access, refresh, nil
 }
 
 func (s *userService) GetUserByID(ctx context.Context, id string) (*model.User, error) {

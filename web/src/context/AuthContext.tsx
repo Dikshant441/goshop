@@ -5,9 +5,7 @@ import React, {
   useEffect,
   useState,
 } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { authApi } from '@/api/auth'
-import { paymentsApi } from '@/api/payments'
 import {
   clearTokens,
   getAccessToken,
@@ -64,21 +62,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setUser(result.user)
   }
 
-  const { data: publicConfig } = useQuery({
-    queryKey: ['publicConfig'],
-    queryFn: paymentsApi.publicConfig,
-    staleTime: Infinity,
-  })
-
   const logout = useCallback(() => {
     clearTokens()
     setUser(null)
-    if (publicConfig?.auth_mode === 'oidc') {
-      // Full-page navigation so Authentik's end-session endpoint can also
-      // clear the upstream session cookie before bouncing back.
-      window.location.href = '/api/v1/auth/logout'
-    }
-  }, [publicConfig?.auth_mode])
+  }, [])
 
   return (
     <AuthContext.Provider

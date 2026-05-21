@@ -137,6 +137,8 @@ func (suite *UserHandlerTestSuite) TestRegister() {
 						Email:    "register@test.com",
 						Password: "test123456",
 					},
+					"access-token",
+					"refresh-token",
 					nil,
 				).Times(1)
 			},
@@ -156,7 +158,7 @@ func (suite *UserHandlerTestSuite) TestRegister() {
 				suite.mockService.On("Register", mock.Anything, &domain.RegisterReq{
 					Email:    "register@test.com",
 					Password: "test123456",
-				}).Return(nil, errors.New("error")).Times(1)
+				}).Return(nil, "", "", errors.New("error")).Times(1)
 			},
 			req: &pb.RegisterReq{
 				Email:    "register@test.com",
