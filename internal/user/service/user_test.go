@@ -13,9 +13,37 @@ import (
 	domain "goshop/internal/user/domain"
 	"goshop/internal/user/model"
 	"goshop/internal/user/repository/mocks"
+	"goshop/pkg/authentik"
 	"goshop/pkg/config"
 	"goshop/pkg/utils"
 )
+
+// fakeAuthentik is a hand-rolled AuthentikClient stub. mockery v3 doesn't run
+// against this repo's Go toolchain, so we stub by hand — the surface is small.
+type fakeAuthentik struct {
+	loginClaims *authentik.UserClaims
+	loginErr    error
+	createErr   error
+	lookupClaim *authentik.UserClaims
+	lookupErr   error
+
+	loginCalls, createCalls, lookupCalls int
+}
+
+func (f *fakeAuthentik) PasswordLogin(_ context.Context, _, _ string) (*authentik.UserClaims, error) {
+	f.loginCalls++
+	return f.loginClaims, f.loginErr
+}
+
+func (f *fakeAuthentik) CreateUser(_ context.Context, _, _, _ string) error {
+	f.createCalls++
+	return f.createErr
+}
+
+func (f *fakeAuthentik) LookupUserByEmail(_ context.Context, _ string) (*authentik.UserClaims, error) {
+	f.lookupCalls++
+	return f.lookupClaim, f.lookupErr
+}
 
 type UserServiceTestSuite struct {
 	suite.Suite
@@ -395,4 +423,156 @@ func (suite *UserServiceTestSuite) TestUpsertUserFromOIDC() {
 			suite.Equal(tc.wantID, user.ID)
 		})
 	}
+}
+
+// OIDC mode wiring — Login + Register branches that delegate to Authentik.
+// =================================================================================================
+
+func (suite *UserServiceTestSuite) newOIDCService(ak *fakeAuthentik) UserService {
+	suite.mockRepo = mocks.NewUserRepository(suite.T())
+	return NewUserService(validation.New(), suite.mockRepo, ak)
+}
+
+func (suite *UserServiceTestSuite) TestLogin_OIDC_Success() {
+	ak := &fakeAuthentik{loginClaims: &authentik.UserClaims{Sub: "sub-1", Email: "u@x.test", Name: "U"}}
+	svc := suite.newOIDCService(ak)
+	suite.mockRepo.On("GetUserByID", mock.Anything, "sub-1").
+		Return(&model.User{ID: "sub-1", Email: "u@x.test"}, nil).Times(1)
+
+	user, access, refresh, err := svc.Login(context.Background(), &domain.LoginReq{Email: "u@x.test", Password: "test123456"})
+
+	suite.NoError(err)
+	suite.Equal("sub-1", user.ID)
+	suite.NotEmpty(access)
+	suite.NotEmpty(refresh)
+	suite.Equal(1, ak.loginCalls)
+}
+
+func (suite *UserServiceTestSuite) TestLogin_OIDC_AuthentikRejects() {
+	ak := &fakeAuthentik{loginErr: errors.New("bad pw")}
+	svc := suite.newOIDCService(ak)
+
+	user, access, refresh, err := svc.Login(context.Background(), &domain.LoginReq{Email: "u@x.test", Password: "test123456"})
+
+	suite.Error(err)
+	suite.Nil(user)
+	suite.Empty(access)
+	suite.Empty(refresh)
+}
+
+func (suite *UserServiceTestSuite) TestLogin_OIDC_UpsertFails() {
+	ak := &fakeAuthentik{loginClaims: &authentik.UserClaims{Sub: "sub-1", Email: "u@x.test"}}
+	svc := suite.newOIDCService(ak)
+	// UpsertUserFromOIDC: lookup-by-sub fails AND lookup-by-email fails AND create fails.
+	suite.mockRepo.On("GetUserByID", mock.Anything, "sub-1").Return(nil, errors.New("nf")).Times(1)
+	suite.mockRepo.On("GetUserByEmail", mock.Anything, "u@x.test").Return(nil, errors.New("nf")).Times(1)
+	suite.mockRepo.On("Create", mock.Anything, mock.Anything).Return(errors.New("db down")).Times(1)
+
+	_, _, _, err := svc.Login(context.Background(), &domain.LoginReq{Email: "u@x.test", Password: "test123456"})
+	suite.Error(err)
+}
+
+func (suite *UserServiceTestSuite) TestLogin_OIDC_ValidationFails() {
+	ak := &fakeAuthentik{}
+	svc := suite.newOIDCService(ak)
+
+	_, _, _, err := svc.Login(context.Background(), &domain.LoginReq{Email: "not-email", Password: "test123456"})
+	suite.Error(err)
+	suite.Equal(0, ak.loginCalls, "must not call Authentik when input is invalid")
+}
+
+func (suite *UserServiceTestSuite) TestRegister_OIDC_Success() {
+	ak := &fakeAuthentik{lookupClaim: &authentik.UserClaims{Sub: "sub-2", Email: "u@x.test", Name: "U"}}
+	svc := suite.newOIDCService(ak)
+	suite.mockRepo.On("GetUserByID", mock.Anything, "sub-2").Return(nil, errors.New("nf")).Times(1)
+	suite.mockRepo.On("GetUserByEmail", mock.Anything, "u@x.test").Return(nil, errors.New("nf")).Times(1)
+	suite.mockRepo.On("Create", mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	user, access, refresh, err := svc.Register(context.Background(), &domain.RegisterReq{Email: "u@x.test", Password: "test123456"})
+
+	suite.NoError(err)
+	suite.Equal("sub-2", user.ID)
+	suite.NotEmpty(access)
+	suite.NotEmpty(refresh)
+	suite.Equal(1, ak.createCalls)
+	suite.Equal(1, ak.lookupCalls)
+}
+
+func (suite *UserServiceTestSuite) TestRegister_OIDC_CreateFails() {
+	ak := &fakeAuthentik{createErr: errors.New("dup email")}
+	svc := suite.newOIDCService(ak)
+
+	_, _, _, err := svc.Register(context.Background(), &domain.RegisterReq{Email: "u@x.test", Password: "test123456"})
+	suite.Error(err)
+	suite.Equal(0, ak.lookupCalls)
+}
+
+func (suite *UserServiceTestSuite) TestRegister_OIDC_LookupFails() {
+	ak := &fakeAuthentik{lookupErr: errors.New("not found")}
+	svc := suite.newOIDCService(ak)
+
+	_, _, _, err := svc.Register(context.Background(), &domain.RegisterReq{Email: "u@x.test", Password: "test123456"})
+	suite.Error(err)
+	suite.Equal(1, ak.createCalls)
+}
+
+func (suite *UserServiceTestSuite) TestRegister_OIDC_UpsertFails() {
+	ak := &fakeAuthentik{lookupClaim: &authentik.UserClaims{Sub: "sub-2", Email: "u@x.test"}}
+	svc := suite.newOIDCService(ak)
+	suite.mockRepo.On("GetUserByID", mock.Anything, "sub-2").Return(nil, errors.New("nf")).Times(1)
+	suite.mockRepo.On("GetUserByEmail", mock.Anything, "u@x.test").Return(nil, errors.New("nf")).Times(1)
+	suite.mockRepo.On("Create", mock.Anything, mock.Anything).Return(errors.New("db down")).Times(1)
+
+	_, _, _, err := svc.Register(context.Background(), &domain.RegisterReq{Email: "u@x.test", Password: "test123456"})
+	suite.Error(err)
+}
+
+func (suite *UserServiceTestSuite) TestRegister_OIDC_ValidationFails() {
+	ak := &fakeAuthentik{}
+	svc := suite.newOIDCService(ak)
+
+	_, _, _, err := svc.Register(context.Background(), &domain.RegisterReq{Email: "not-email", Password: "test123456"})
+	suite.Error(err)
+	suite.Equal(0, ak.createCalls)
+}
+
+// UpsertUserFromOIDC paths exercised through Login_OIDC above but we cover
+// the JWT-era email-match fallback explicitly here.
+func (suite *UserServiceTestSuite) TestUpsertUserFromOIDC_LegacyEmailMatch() {
+	ak := &fakeAuthentik{loginClaims: &authentik.UserClaims{Sub: "new-sub", Email: "u@x.test"}}
+	svc := suite.newOIDCService(ak)
+	legacy := &model.User{ID: "legacy-id", Email: "u@x.test"}
+	suite.mockRepo.On("GetUserByID", mock.Anything, "new-sub").Return(nil, errors.New("nf")).Times(1)
+	suite.mockRepo.On("GetUserByEmail", mock.Anything, "u@x.test").Return(legacy, nil).Times(1)
+
+	user, _, _, err := svc.Login(context.Background(), &domain.LoginReq{Email: "u@x.test", Password: "test123456"})
+
+	suite.NoError(err)
+	suite.Equal("legacy-id", user.ID, "must keep legacy id, not replace with OIDC sub")
+}
+
+func (suite *UserServiceTestSuite) TestUpsertUserFromOIDC_EmailChanged() {
+	ak := &fakeAuthentik{loginClaims: &authentik.UserClaims{Sub: "sub-3", Email: "new@x.test"}}
+	svc := suite.newOIDCService(ak)
+	existing := &model.User{ID: "sub-3", Email: "old@x.test"}
+	suite.mockRepo.On("GetUserByID", mock.Anything, "sub-3").Return(existing, nil).Times(1)
+	suite.mockRepo.On("Update", mock.Anything, mock.MatchedBy(func(u *model.User) bool {
+		return u.Email == "new@x.test"
+	})).Return(nil).Times(1)
+
+	user, _, _, err := svc.Login(context.Background(), &domain.LoginReq{Email: "new@x.test", Password: "test123456"})
+
+	suite.NoError(err)
+	suite.Equal("new@x.test", user.Email)
+}
+
+func (suite *UserServiceTestSuite) TestUpsertUserFromOIDC_EmailUpdateFails() {
+	ak := &fakeAuthentik{loginClaims: &authentik.UserClaims{Sub: "sub-3", Email: "new@x.test"}}
+	svc := suite.newOIDCService(ak)
+	existing := &model.User{ID: "sub-3", Email: "old@x.test"}
+	suite.mockRepo.On("GetUserByID", mock.Anything, "sub-3").Return(existing, nil).Times(1)
+	suite.mockRepo.On("Update", mock.Anything, mock.Anything).Return(errors.New("db down")).Times(1)
+
+	_, _, _, err := svc.Login(context.Background(), &domain.LoginReq{Email: "new@x.test", Password: "test123456"})
+	suite.Error(err)
 }

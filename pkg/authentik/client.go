@@ -66,9 +66,9 @@ type UserClaims struct {
 //   - component == "ak-stage-password" with response_errors → bad password
 //   - component == "ak-stage-access-denied" or similar → user blocked
 type flowChallenge struct {
-	Component      string                       `json:"component"`
-	PendingUser    string                       `json:"pending_user"`
-	ResponseErrors map[string][]flowFieldError  `json:"response_errors"`
+	Component      string                      `json:"component"`
+	PendingUser    string                      `json:"pending_user"`
+	ResponseErrors map[string][]flowFieldError `json:"response_errors"`
 }
 
 type flowFieldError struct {
@@ -283,4 +283,3 @@ func (c *Client) LookupUserByEmail(ctx context.Context, email string) (*UserClai
 	u := page.Results[0]
 	return &UserClaims{Sub: u.UUID, Email: u.Email, Name: u.Name}, nil
 }
-
