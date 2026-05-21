@@ -286,8 +286,10 @@ func TestRoutes_OIDCMode_MountsGETLoginAndCallback(t *testing.T) {
 
 	loc, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)
-	require.Equal(t, "/source/oauth/login/google/", loc.Path, "should point at Authentik's source login endpoint")
-	require.NotEmpty(t, loc.Query().Get("next"), "next must contain the OIDC authorize URL")
+	require.Equal(t, "/flows/-/default/invalidation/", loc.Path, "outer hop must invalidate the session first")
+	next, err := url.Parse(loc.Query().Get("next"))
+	require.NoError(t, err)
+	require.Equal(t, "/source/oauth/login/google/", next.Path, "inner hop must target the source login endpoint")
 
 	// Test rename signal: also assert the legacy GET /auth/login path is gone.
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/login?provider=google", nil)
