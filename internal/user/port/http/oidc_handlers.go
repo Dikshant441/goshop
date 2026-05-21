@@ -95,22 +95,14 @@ func (h *OIDCHandler) SSORedirect(c *gin.Context) {
 	}
 
 	authURL := h.oidc.AuthCodeURL("goshop-state")
-	u, err := url.Parse(authURL)
-	if err != nil {
+	if _, err := url.Parse(authURL); err != nil {
 		apperror.Wrap(apperror.ErrInternal, err).HTTPError(c)
 		return
 	}
-	// Force a fresh authentication round-trip so Authentik never reuses an
-	// existing session cookie. Without this, the source-enrollment flow on a
-	// returning external user lands on /if/user/ (Internal-only) and 403s.
-	q := u.Query()
-	q.Set("prompt", "login")
-	q.Set("max_age", "0")
-	u.RawQuery = q.Encode()
 
 	base := strings.TrimRight(h.cfg.AuthentikAPIBase, "/")
 	target := fmt.Sprintf("%s/source/oauth/login/%s/?next=%s",
-		base, slug, url.QueryEscape(u.String()))
+		base, slug, url.QueryEscape(authURL))
 	c.Redirect(http.StatusFound, target)
 }
 
