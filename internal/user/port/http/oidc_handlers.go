@@ -82,10 +82,12 @@ func newOIDCHandlerWith(svc service.UserService, cfg *config.Schema, client oidc
 	return &OIDCHandler{service: svc, cfg: cfg, oidc: client}
 }
 
-// SSORedirect 302s the browser straight into Authentik's federated source
-// login endpoint (/source/oauth/login/<slug>/), wrapping the OIDC authorize
-// URL as the `next` param. This bypasses the Authentik authentication flow
-// UI entirely — the user never sees Authentik, only the upstream IdP.
+// SSORedirect 302s the browser to Authentik's OIDC authorize endpoint with
+// source=<slug> + prompt=login. The Identification Stage on Authentik's
+// authentication flow must have the matching source bound; with that, it
+// auto-redirects to the upstream IdP without showing any Authentik UI, and
+// prompt=login forces a fresh round-trip every time so a stale session can
+// never short-circuit into /if/user/.
 // GET /api/v1/auth/sso/:provider
 func (h *OIDCHandler) SSORedirect(c *gin.Context) {
 	slug := providerSlug(h.cfg, c.Param("provider"))
@@ -94,16 +96,18 @@ func (h *OIDCHandler) SSORedirect(c *gin.Context) {
 		return
 	}
 
-	authURL := h.oidc.AuthCodeURL("goshop-state")
-	if _, err := url.Parse(authURL); err != nil {
+	u, err := url.Parse(h.oidc.AuthCodeURL("goshop-state"))
+	if err != nil {
 		apperror.Wrap(apperror.ErrInternal, err).HTTPError(c)
 		return
 	}
+	q := u.Query()
+	q.Set("source", slug)
+	q.Set("prompt", "login")
+	q.Set("max_age", "0")
+	u.RawQuery = q.Encode()
 
-	base := strings.TrimRight(h.cfg.AuthentikAPIBase, "/")
-	target := fmt.Sprintf("%s/source/oauth/login/%s/?next=%s",
-		base, slug, url.QueryEscape(authURL))
-	c.Redirect(http.StatusFound, target)
+	c.Redirect(http.StatusFound, u.String())
 }
 
 // Logout 302s the browser to Authentik's end-session endpoint, which clears

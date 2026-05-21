@@ -83,7 +83,7 @@ func (s *OIDCHandlerTestSuite) newSSO(provider string) (*gin.Context, *httptest.
 // Login
 // =================================================================================================
 
-func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_RedirectsToSourceLoginWithNext() {
+func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_AddsSourceAndPromptToAuthorizeURL() {
 	const authURL = "https://auth.example.com/application/o/authorize/?client_id=x&state=goshop-state"
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: authURL})
 
@@ -94,8 +94,12 @@ func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_RedirectsToSourceLoginWithN
 		s.Equal(http.StatusFound, w.Code)
 		loc, err := url.Parse(w.Header().Get("Location"))
 		s.Require().NoError(err)
-		s.Equal("/source/oauth/login/"+p+"/", loc.Path, "path must target the source login endpoint")
-		s.Equal(authURL, loc.Query().Get("next"), "next must hold the OIDC authorize URL verbatim")
+		s.Equal("/application/o/authorize/", loc.Path, "must point at the OIDC authorize endpoint")
+		s.Equal(p, loc.Query().Get("source"), "source param routes the flow to the federated IdP")
+		s.Equal("login", loc.Query().Get("prompt"), "prompt=login forces a fresh upstream round-trip")
+		s.Equal("0", loc.Query().Get("max_age"))
+		s.Equal("x", loc.Query().Get("client_id"))
+		s.Equal("goshop-state", loc.Query().Get("state"))
 	}
 }
 
@@ -143,7 +147,7 @@ func (s *OIDCHandlerTestSuite) TestSSO_ProviderIsCaseInsensitive() {
 
 	s.Equal(http.StatusFound, w.Code)
 	loc, _ := url.Parse(w.Header().Get("Location"))
-	s.Equal("/source/oauth/login/google/", loc.Path)
+	s.Equal("google", loc.Query().Get("source"))
 }
 
 // NewOIDCHandler init-failure
