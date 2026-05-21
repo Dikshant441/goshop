@@ -95,20 +95,22 @@ func (h *OIDCHandler) SSORedirect(c *gin.Context) {
 	}
 
 	authURL := h.oidc.AuthCodeURL("goshop-state")
-	if _, err := url.Parse(authURL); err != nil {
+	u, err := url.Parse(authURL)
+	if err != nil {
 		apperror.Wrap(apperror.ErrInternal, err).HTTPError(c)
 		return
 	}
+	// Force a fresh authentication round-trip so Authentik never reuses an
+	// existing session cookie. Without this, the source-enrollment flow on a
+	// returning external user lands on /if/user/ (Internal-only) and 403s.
+	q := u.Query()
+	q.Set("prompt", "login")
+	q.Set("max_age", "0")
+	u.RawQuery = q.Encode()
 
 	base := strings.TrimRight(h.cfg.AuthentikAPIBase, "/")
-	sourceLogin := fmt.Sprintf("%s/source/oauth/login/%s/?next=%s",
-		base, slug, url.QueryEscape(authURL))
-
-	// Chain through Authentik's invalidation (logout) flow first so the
-	// /source/oauth/login/ endpoint never reuses a stale session — that's
-	// what dumps returning external users at /if/user/.
-	target := fmt.Sprintf("%s/flows/-/default/invalidation/?next=%s",
-		base, url.QueryEscape(sourceLogin))
+	target := fmt.Sprintf("%s/source/oauth/login/%s/?next=%s",
+		base, slug, url.QueryEscape(u.String()))
 	c.Redirect(http.StatusFound, target)
 }
 

@@ -83,7 +83,7 @@ func (s *OIDCHandlerTestSuite) newSSO(provider string) (*gin.Context, *httptest.
 // Login
 // =================================================================================================
 
-func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_ChainsLogoutThenSourceLogin() {
+func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_RedirectsToSourceLoginWithNext() {
 	const authURL = "https://auth.example.com/application/o/authorize/?client_id=x&state=goshop-state"
 	h := newOIDCHandlerWith(s.svc, s.cfg, &fakeOIDC{authURL: authURL})
 
@@ -94,16 +94,16 @@ func (s *OIDCHandlerTestSuite) TestSSO_ValidProvider_ChainsLogoutThenSourceLogin
 		s.Equal(http.StatusFound, w.Code)
 		loc, err := url.Parse(w.Header().Get("Location"))
 		s.Require().NoError(err)
+		s.Equal("/source/oauth/login/"+p+"/", loc.Path, "path must target the source login endpoint")
 
-		// Outer hop: Authentik's invalidation flow (logout).
-		s.Equal("/flows/-/default/invalidation/", loc.Path,
-			"outer redirect must clear any stale Authentik session first")
-
-		// Middle hop: /source/oauth/login/<slug>/?next=<authorize URL>.
+		// next holds the authorize URL with the prompt/max_age params we add
+		// to force a fresh upstream auth round-trip.
 		next, err := url.Parse(loc.Query().Get("next"))
 		s.Require().NoError(err)
-		s.Equal("/source/oauth/login/"+p+"/", next.Path)
-		s.Equal(authURL, next.Query().Get("next"))
+		s.Equal("login", next.Query().Get("prompt"))
+		s.Equal("0", next.Query().Get("max_age"))
+		s.Equal("x", next.Query().Get("client_id"))
+		s.Equal("goshop-state", next.Query().Get("state"))
 	}
 }
 
@@ -151,8 +151,7 @@ func (s *OIDCHandlerTestSuite) TestSSO_ProviderIsCaseInsensitive() {
 
 	s.Equal(http.StatusFound, w.Code)
 	loc, _ := url.Parse(w.Header().Get("Location"))
-	next, _ := url.Parse(loc.Query().Get("next"))
-	s.Equal("/source/oauth/login/google/", next.Path)
+	s.Equal("/source/oauth/login/google/", loc.Path)
 }
 
 // NewOIDCHandler init-failure
