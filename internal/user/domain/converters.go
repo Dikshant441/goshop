@@ -12,6 +12,7 @@ func UserFromModel(m *model.User) *User {
 	return &User{
 		ID:        m.ID,
 		Email:     m.Email,
+		Role:      string(m.Role),
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}
